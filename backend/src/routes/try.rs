@@ -9,10 +9,9 @@ use solana_sdk::{
 };
 use std::str::FromStr;
 use std::sync::Arc;
-use crate::AppState;
 use uuid::Uuid;
 use chrono::Utc;
-
+use crate::AppState;
 
 #[derive(Deserialize)]
 pub struct DepositRequest {
@@ -92,12 +91,10 @@ pub async fn handle_deposit(
 
     match client.send_and_confirm_transaction(&transaction) {
         Ok(sig) => {
-
-            
-
             let now = Utc::now().to_rfc3339();
             let id = Uuid::new_v4().to_string();
 
+            // save deposit record
             let _ = sqlx::query(
                 "INSERT INTO deposits (id, pubkey, amount_sol, signature, created_at)
                  VALUES (?, ?, ?, ?, ?)"
@@ -110,7 +107,7 @@ pub async fn handle_deposit(
             .execute(&state.db)
             .await;
 
-
+            // upsert user record
             let _ = sqlx::query(
                 "INSERT INTO users (pubkey, total_deposited, total_withdrawn, created_at)
                  VALUES (?, ?, 0, ?)
@@ -131,7 +128,7 @@ pub async fn handle_deposit(
                     signature: Some(sig.to_string()),
                 }),
             )
-        },
+        }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(DepositResponse {

@@ -1,16 +1,22 @@
 mod config;
 mod wallet;
 mod routes;
+mod db;
+
+
 
 use config::Config;
 use wallet::{load_or_create_wallet, get_balance};
 use solana_sdk::signature::Signer;
 use axum::{Router, routing::get, routing::post};
 use std::sync::Arc;
+use sqlx::SqlitePool;
+
 
 pub struct AppState {
     pub rpc_url: String,
     pub wallet_path: String,
+    pub db: SqlitePool,
 }
 
 
@@ -33,10 +39,22 @@ async fn main() -> anyhow::Result<()> {
         Err(e) => println!(" Could not fetch balance: {}", e),
     }
 
+    let db = match db::init_db().await{
+        Ok(pool)=>{
+            println!("Database initialized successfully");
+            pool
+        }
+        Err(e)=>{
+            println!("Database error: {}", e);
+            return Err(e);
+        }
+    };
+
 
     let state = Arc::new(AppState{
         rpc_url: config.rpc_url,
         wallet_path: config.wallet_path,
+        db,
     });
 
     let app = Router::new()
@@ -45,9 +63,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/withdraw", post(routes::withdraw::handle_withdraw))
         .with_state(state);
 
-    println!("Server running on http://localhost:3001");
+    println!("Server running on http://localhost:3002");
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3001").await?;
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3002").await?;
     axum::serve(listener, app).await?;
 
     Ok(())
