@@ -12,6 +12,8 @@ use std::sync::Arc;
 use crate::AppState;
 use uuid::Uuid;
 use chrono::Utc;
+//use crate::marinade::stake_sol;
+use crate::staking::stake_native;
 
 
 #[derive(Deserialize)]
@@ -123,14 +125,38 @@ pub async fn handle_deposit(
             .execute(&state.db)
             .await;
 
+
+            match stake_native(&state.rpc_url, &protocol_keypair, payload.amount_sol).await {
+                Ok((stake_sig, stake_account)) => {
+                    println!("Auto staked natively. Stake signature: {}", stake_sig);
+                    let stake_id = Uuid::new_v4().to_string();
+                    let _ = sqlx::query(
+                        "INSERT INTO stake_accounts (id, pubkey, stake_account, amount_sol, signature, created_at)
+                         VALUES (?, ?, ?, ?, ?, ?)"
+                    )
+                    .bind(&stake_id)
+                    .bind(&payload.from_pubkey)
+                    .bind(&stake_account)
+                    .bind(payload.amount_sol)
+                    .bind(&stake_sig)
+                    .bind(&Utc::now().to_rfc3339())
+                    .execute(&state.db)
+                    .await;
+                }
+                Err(e) => {
+                    println!("Staking failed (deposit still recorded): {}", e);
+                }
+            }
+
             (
                 StatusCode::OK,
                 Json(DepositResponse {
                     success: true,
-                    message: format!("Deposit of {} SOL successful", payload.amount_sol),
+                    message: format!("Deposit of {} SOL successful and staked on Marinade", payload.amount_sol),
                     signature: Some(sig.to_string()),
                 }),
             )
+        
         },
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,

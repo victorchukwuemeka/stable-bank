@@ -30,6 +30,19 @@ pub async fn init_db() -> Result<SqlitePool> {
     .execute(&pool)
     .await?;
 
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS stake_accounts (
+            id TEXT PRIMARY KEY,
+            pubkey TEXT NOT NULL,
+            stake_account TEXT NOT NULL,
+            amount_sol REAL NOT NULL,
+            signature TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )"
+    )
+    .execute(&pool)
+    .await?;
+
     println!("Database ready");
     Ok(pool)
 }

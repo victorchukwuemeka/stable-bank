@@ -2,6 +2,8 @@ mod config;
 mod wallet;
 mod routes;
 mod db;
+mod marinade;
+mod staking;
 
 
 
@@ -61,6 +63,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/deposit", post(routes::deposit::handle_deposit))
         .route("/balance/:pubkey", get(routes::balance::handle_balance))
         .route("/withdraw", post(routes::withdraw::handle_withdraw))
+        .route("/withdraw/claim", post(routes::withdraw::handle_claim))
         .with_state(state);
 
     println!("Server running on http://localhost:3002");
