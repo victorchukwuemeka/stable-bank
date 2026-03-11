@@ -1,4 +1,4 @@
-# StableBank 🏦
+# StableBank
 
 **A decentralized savings protocol on Solana.**
 > Deposit SOL. We stake it. You earn. No banks. No middlemen.
@@ -19,13 +19,17 @@ Just **deposit → stake → earn.**
 
 ```
 User sends SOL to StableBank
-           ↓
-StableBank stakes it on Marinade / Jito
-           ↓
-Staking yield accumulates (7–9% APY)
-           ↓
+           |
+           v
+StableBank stakes it natively on Solana
+           |
+           v
+Staking yield accumulates (6–9% APY)
+           |
+           v
 User earns yield on their balance
-           ↓
+           |
+           v
 User withdraws SOL + earnings anytime
 ```
 
@@ -33,51 +37,129 @@ StableBank is the savings account that banks never gave you.
 
 ---
 
-## Staking Backends
+## Onramp / Offramp
 
-StableBank does not build staking from scratch.
-It sits **on top** of existing, battle-tested Solana staking protocols:
+StableBank is designed so that anyone — even without crypto knowledge — can use it.
+No wallet setup. No SOL required upfront. Just savings that earn.
 
-| Protocol | Type | Est. Yield |
+```
+ONRAMP
+User has Naira / USD
+           |
+           v
+Pay via bank transfer, card, or mobile money
+(Transak / Flutterwave)
+           |
+           v
+SOL purchased automatically
+           |
+           v
+SOL deposited into StableBank and starts earning
+
+OFFRAMP
+User wants to withdraw earnings
+           |
+           v
+StableBank unstakes SOL
+           |
+           v
+SOL converts to USDC via Jupiter swap
+           |
+           v
+Transak / Flutterwave converts USDC to Naira / USD
+           |
+           v
+Lands in user bank account
+```
+
+Onramp / Offramp providers:
+
+| Provider | Coverage | Notes |
 |---|---|---|
-| [Marinade Finance](https://marinade.finance) | Liquid Staking | ~7% APY |
-| [Jito](https://jito.network) | Liquid Staking + MEV | ~8–9% APY |
-| [Sanctum](https://sanctum.so) | LST Infrastructure | Varies |
-
-> StableBank routes deposits to these protocols and passes yield back to users minus a small protocol fee.
+| Transak | Nigeria, 150+ countries | Naira + bank transfer support |
+| Flutterwave | Nigeria first | Local bank transfer, cards |
+| MoonPay | Global | Card payments |
+| Onramp.money | Solana native | Direct SOL onramp |
 
 ---
 
-## Architecture Approaches
+## Staking Backends
 
-StableBank can be built in three ways depending on the stage:
+StableBank does not build staking from scratch.
+It sits on top of existing, battle-tested Solana staking protocols:
 
-### Option A — Off-Chain *(Phase 1, Now)*
-A backend server holds a custodial wallet, receives user SOL, stakes it via Marinade/Jito SDK, and tracks balances in a database.
+| Protocol | Type | Est. Yield |
+|---|---|---|
+| Native Solana Staking | Validator delegation | ~6-7% APY |
+| Marinade Finance | Liquid Staking | ~7% APY |
+| Jito | Liquid Staking + MEV | ~8-9% APY |
+| Sanctum | LST Infrastructure | Varies |
 
-- ✅ Cheapest to build
-- ✅ No deployment costs
-- ✅ Ship fast, validate fast
-- ⚠️ Custodial — users trust you with their SOL
-- **Best for:** Friends and family early adopters
+StableBank routes deposits to these protocols and passes yield back to users minus a small protocol fee.
 
-### Option B — Hybrid *(Phase 2)*
-A lightweight on-chain program handles deposits and withdrawals. Backend handles staking logic and yield distribution.
+---
 
-- ✅ Partially trustless
-- ✅ Lower cost than fully on-chain
-- ⚠️ Still some custodial elements
-- **Best for:** Small public beta
+## Yield Aggregator (Phase 2)
 
-### Option C — Fully On-Chain *(Phase 3)*
+StableBank will automatically route SOL to whichever protocol offers the best yield at any given time.
+
+```
+User deposits SOL
+           |
+           v
+Aggregator checks all protocols in real time
+Native: 6-7% | Marinade: 7% | Jito: 8-9% | Kamino: 10%+
+           |
+           v
+SOL routed to best yield automatically
+           |
+           v
+User always earns maximum available APY
+```
+
+---
+
+## Agentic Yield Optimization (Phase 3)
+
+An autonomous agent monitors yields 24/7 and rebalances deposits when better opportunities arise.
+
+```
+Agent detects Jito yield > Native yield by 1%
+           |
+           v
+Agent triggers rebalance instruction
+           |
+           v
+SOL moves from Native staking to Jito automatically
+           |
+           v
+User earns better yield without doing anything
+```
+
+---
+
+## Architecture
+
+### Option A — Off-Chain (Phase 1, Now)
+A backend server holds a custodial wallet, receives user SOL, stakes natively on Solana, and tracks balances in a database.
+
+- Cheapest to build, no deployment costs, ship fast
+- Custodial — users trust you with their SOL
+- Best for: personal testing and close circle of users
+
+### Option B — Hybrid (Phase 2)
+A lightweight Pinocchio program handles deposits and withdrawals. Backend handles staking and yield logic.
+
+- Partially trustless, lower cost than fully on-chain
+- Best for: small public beta
+
+### Option C — Fully On-Chain (Phase 3)
 Everything lives in a Solana program. Non-custodial. Users always control their funds.
 
-- ✅ Fully trustless
-- ✅ Production-grade
-- ⚠️ Highest cost (deployment rent + audit)
-- **Best for:** Full public launch
+- Fully trustless, production-grade
+- Best for: full public launch
 
-> **Current stage: Option A**
+> Current stage: Option A
 
 ---
 
@@ -86,11 +168,12 @@ Everything lives in a Solana program. Non-custodial. Users always control their 
 | Layer | Tool |
 |---|---|
 | Blockchain | Solana |
-| On-Chain Programs | [Pinocchio](https://github.com/febo/pinocchio) |
-| Staking | Marinade SDK / Jito SDK |
-| Backend | Node.js / TypeScript |
-| Database | PostgreSQL (balance tracking) |
+| On-Chain Programs | Pinocchio |
+| Backend | Rust (Axum, solana-sdk, solana-client) |
+| Staking | Native Solana staking → Marinade / Jito (Phase 2) |
+| Database | SQLite (Phase 1) → PostgreSQL (Phase 2) |
 | Frontend | React + Solana Wallet Adapter |
+| Onramp / Offramp | Transak / Flutterwave |
 | RPC | Helius (free tier) |
 
 ---
@@ -99,93 +182,106 @@ Everything lives in a Solana program. Non-custodial. Users always control their 
 
 ```
 stablebank/
-├── programs/              # On-chain programs (Pinocchio)
+├── backend/                   # Rust backend (Axum)
+│   ├── src/
+│   │   ├── main.rs
+│   │   ├── config.rs
+│   │   ├── db.rs
+│   │   ├── staking.rs
+│   │   ├── marinade.rs
+│   │   ├── wallet/
+│   │   │   └── mod.rs
+│   │   └── routes/
+│   │       ├── mod.rs
+│   │       ├── deposit.rs
+│   │       ├── balance.rs
+│   │       └── withdraw.rs
+│   ├── Cargo.toml
+│   └── .env
+├── programs/                  # On-chain programs (Pinocchio) — Phase 2
 │   └── stablebank/
 │       └── src/
-├── app/                   # Frontend (React)
+├── app/                       # Frontend (React) — in progress
 │   ├── components/
 │   └── pages/
-├── backend/               # Off-chain server (Node.js)
-│   ├── staking/           # Marinade / Jito integration
-│   ├── accounts/          # User balance tracking
-│   └── yield/             # Yield calculation + distribution
-├── docs/                  # Documentation
+├── docs/
 │   ├── whitepaper.md
 │   └── architecture.md
-├── scripts/               # Utility + deployment scripts
-├── tests/                 # Tests
 ├── README.md
-└── package.json
+└── .gitignore
 ```
-
-> Update this structure to match your actual setup as you build.
 
 ---
 
 ## Status
 
-> 🟡 **Phase 1 — Building & Validating**
+> Phase 1 — Backend Complete, Frontend Next
 
 | Milestone | Status |
 |---|---|
-| Whitepaper v0.1 | ✅ Done |
-| README | ✅ Done |
-| Backend wallet + staking integration | 🔲 Up next |
-| Marinade / Jito SDK connection | 🔲 Not started |
-| Balance tracking (DB) | 🔲 Not started |
-| Basic frontend (deposit / withdraw) | 🔲 Not started |
-| Test with personal SOL | 🔲 Not started |
-| Invite first users (people you know) | 🔲 Not started |
-| On-chain program (Pinocchio) | 🔲 Phase 2 |
-| Public launch | 🔲 Phase 3 |
+| Whitepaper v0.1 | Done |
+| README | Done |
+| Protocol wallet + Solana connection | Done |
+| Deposit route + DB recording | Done |
+| Native staking integration | Done |
+| Balance + yield tracking route | Done |
+| Withdraw + claim routes | Done |
+| Frontend (deposit / balance / withdraw) | In progress |
+| Yield aggregator (Marinade + Jito) | Phase 2 |
+| Agentic yield optimizer | Phase 2 |
+| Onramp / Offramp integration | Phase 2 |
+| Pinocchio on-chain program | Phase 3 |
+| Security review | Phase 3 |
+| Mainnet launch | Phase 3 |
 
 ---
 
 ## Roadmap
 
-### Phase 1 — Off-Chain MVP *(Now)*
-- Build backend that receives SOL and stakes via Marinade / Jito
-- Track user balances in a database
-- Build a simple UI — deposit, balance, withdraw
-- Test with your own SOL first
-- Onboard a small circle of trusted users
+### Phase 1 — Off-Chain MVP (Now)
+- Backend with deposit, staking, balance, withdraw
+- SQLite database tracking all user positions
+- Frontend — deposit, dashboard, withdraw UI
+- Test full cycle on devnet with personal SOL
+- Onboard small circle of trusted users
 
-### Phase 2 — Hybrid Protocol
-- Introduce a lightweight Pinocchio program for deposits / withdrawals
-- Reduce custodial surface area
-- Add yield dashboard for users
-- Expand to more staking backends
+### Phase 2 — Aggregator + Agent
+- Integrate Marinade and Jito alongside native staking
+- Yield aggregator — auto route to best APY
+- Autonomous agent — monitors and rebalances 24/7
+- Onramp / Offramp — Naira to SOL and back
+- Migrate database to PostgreSQL
 
 ### Phase 3 — Fully On-Chain
-- Full Pinocchio on-chain program
-- Non-custodial — users control their funds
-- Security review
-- Open public launch
+- Pinocchio program — non-custodial deposits and withdrawals
+- On-chain aggregator logic
+- Crank bot — off-chain agent triggers on-chain rebalancing
+- Apply for Solana Foundation grant for audit
+- Mainnet deployment with TVL cap
+- Superteam Nigeria — community and funding
 
 ---
 
 ## Funding & Cost Reality
 
-StableBank is designed to be built with **minimal capital.** Here's the honest breakdown:
-
 | Cost | Phase 1 | Phase 2 | Phase 3 |
 |---|---|---|---|
 | Deployment | $0 (off-chain) | Low (small program) | Medium (full program) |
 | RPC (Helius) | Free tier | Free / $9/mo | Paid plan |
-| Hosting (backend) | Free (Railway / Render) | Free / cheap | Paid |
+| Hosting | Free (Railway / Render) | Free / cheap | Paid |
 | Audit | Not needed | Not needed | Required |
 | Starting SOL | Your own | Your own | Protocol reserve needed |
 
-> The goal of Phase 1 is to prove the model works **before spending serious money.**
+Funding targets: Solana Foundation grants, Superteam Nigeria, Colosseum hackathons.
 
 ---
 
 ## Risks & Honesty
 
-- **Phase 1 is custodial.** Early users are trusting you personally, not a smart contract. Be transparent about this.
-- **Staking protocols carry risk.** Marinade and Jito are battle-tested but not risk-free.
-- **Slashing risk is near zero on Solana** but worth monitoring.
-- **Regulatory landscape** around crypto savings products is evolving. Build responsibly.
+- Phase 1 is custodial. Early users are trusting you personally, not a smart contract. Be transparent about this.
+- Staking protocols carry risk. Battle-tested but not risk-free.
+- Slashing risk is near zero on Solana but worth monitoring.
+- Regulatory landscape around crypto savings products is evolving. Build responsibly.
 
 ---
 
@@ -198,7 +294,7 @@ Ideas and feedback? Open an issue.
 
 ## License
 
-MIT — see [LICENSE](./LICENSE)
+MIT — see LICENSE
 
 ---
 
