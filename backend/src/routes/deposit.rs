@@ -1,32 +1,25 @@
 use axum::{extract::State, http::StatusCode, Json};
 use serde::{Deserialize, Serialize};
 use solana_client::rpc_client::RpcClient;
-use solana_sdk::{
-    pubkey::Pubkey,
-    signature::{read_keypair_file, Signer},
-    system_instruction,
-    transaction::Transaction,
-};
-use std::str::FromStr;
+use solana_sdk::signature::read_keypair_file;
 use std::sync::Arc;
-use crate::AppState;
 use uuid::Uuid;
 use chrono::Utc;
-//use crate::marinade::stake_sol;
+use crate::AppState;
 use crate::staking::stake_native;
-
+//use solana_transaction_status::UiTransactionEncoding;
 
 #[derive(Deserialize)]
 pub struct DepositRequest {
     pub from_pubkey: String,
     pub amount_sol: f64,
+    pub signature: String,
 }
 
 #[derive(Serialize)]
 pub struct DepositResponse {
     pub success: bool,
     pub message: String,
-    pub signature: Option<String>,
 }
 
 pub async fn handle_deposit(
@@ -35,6 +28,102 @@ pub async fn handle_deposit(
 ) -> (StatusCode, Json<DepositResponse>) {
     let client = RpcClient::new(state.rpc_url.clone());
 
+    // confirm the transaction actually landed on-chain
+    println!("Checking transaction: {}", payload.signature);
+    
+    let sig = match payload.signature.parse() {
+        Ok(s) => s,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(DepositResponse {
+                    success: false,
+                    message: "Invalid signature".to_string(),
+                }),
+            )
+        }
+    };
+    
+    /* 
+    match client.confirm_transaction(&sig) {
+        Ok(true) => {}
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(DepositResponse {
+                    success: false,
+                    message: "Transaction not confirmed on chain".to_string(),
+                }),
+            )
+        }
+    }
+    
+    */
+
+    println!("Parsed signature: {}", sig);
+    println!("Checking RPC: {}", state.rpc_url);
+    
+    let mut confirmed = false;
+
+    for attempt  in 0..5 {
+
+        println!("Attempt {} to find transaction...", attempt + 1);
+        match client.get_transaction(
+        &sig, 
+        solana_transaction_status::UiTransactionEncoding::Json
+        ){
+            Ok(tx) =>{
+                println!("tx found {:?}", tx.slot);
+                confirmed = true;
+                break;
+            },
+            Err(e)=> {
+                 println!("Not found yet: {}", e);
+                 tokio::time::sleep(tokio::time::Duration::from_secs(4)).await;
+            }
+        }
+    }
+
+    if !confirmed {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(DepositResponse {
+                success: false,
+                message: "Transaction not found on chain after retries".to_string(),
+            }),
+        );
+    }
+    
+
+    // record deposit in db
+    let now = Utc::now().to_rfc3339();
+    let id = Uuid::new_v4().to_string();
+
+    let _ = sqlx::query(
+        "INSERT INTO deposits (id, pubkey, amount_sol, signature, created_at)
+         VALUES (?, ?, ?, ?, ?)"
+    )
+    .bind(&id)
+    .bind(&payload.from_pubkey)
+    .bind(payload.amount_sol)
+    .bind(&payload.signature)
+    .bind(&now)
+    .execute(&state.db)
+    .await;
+
+    let _ = sqlx::query(
+        "INSERT INTO users (pubkey, total_deposited, total_withdrawn, created_at)
+         VALUES (?, ?, 0, ?)
+         ON CONFLICT(pubkey) DO UPDATE SET
+         total_deposited = total_deposited + excluded.total_deposited"
+    )
+    .bind(&payload.from_pubkey)
+    .bind(payload.amount_sol)
+    .bind(&now)
+    .execute(&state.db)
+    .await;
+
+    // auto stake
     let protocol_keypair = match read_keypair_file(&state.wallet_path) {
         Ok(k) => k,
         Err(e) => {
@@ -43,128 +132,38 @@ pub async fn handle_deposit(
                 Json(DepositResponse {
                     success: false,
                     message: format!("Failed to load protocol wallet: {}", e),
-                    signature: None,
                 }),
             )
         }
     };
 
-    let from_pubkey = match Pubkey::from_str(&payload.from_pubkey) {
-        Ok(p) => p,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(DepositResponse {
-                    success: false,
-                    message: "Invalid public key".to_string(),
-                    signature: None,
-                }),
+    match stake_native(&state.rpc_url, &protocol_keypair, payload.amount_sol).await {
+        Ok((stake_sig, stake_account)) => {
+            println!("Auto staked natively. Stake signature: {}", stake_sig);
+            let stake_id = Uuid::new_v4().to_string();
+            let _ = sqlx::query(
+                "INSERT INTO stake_accounts (id, pubkey, stake_account, amount_sol, signature, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?)"
             )
+            .bind(&stake_id)
+            .bind(&payload.from_pubkey)
+            .bind(&stake_account)
+            .bind(payload.amount_sol)
+            .bind(&stake_sig)
+            .bind(&Utc::now().to_rfc3339())
+            .execute(&state.db)
+            .await;
         }
-    };
-
-    let lamports = (payload.amount_sol * 1_000_000_000.0) as u64;
-
-    let instruction = system_instruction::transfer(
-        &from_pubkey,
-        &protocol_keypair.pubkey(),
-        lamports,
-    );
-
-    let recent_blockhash = match client.get_latest_blockhash() {
-        Ok(bh) => bh,
         Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(DepositResponse {
-                    success: false,
-                    message: format!("Failed to get blockhash: {}", e),
-                    signature: None,
-                }),
-            )
+            println!("Staking failed (deposit still recorded): {}", e);
         }
-    };
-
-    let transaction = Transaction::new_signed_with_payer(
-        &[instruction],
-        Some(&from_pubkey),
-        &[&protocol_keypair],
-        recent_blockhash,
-    );
-
-    match client.send_and_confirm_transaction(&transaction) {
-        Ok(sig) => {
-
-            
-
-            let now = Utc::now().to_rfc3339();
-            let id = Uuid::new_v4().to_string();
-
-            let _ = sqlx::query(
-                "INSERT INTO deposits (id, pubkey, amount_sol, signature, created_at)
-                 VALUES (?, ?, ?, ?, ?)"
-            )
-            .bind(&id)
-            .bind(&payload.from_pubkey)
-            .bind(payload.amount_sol)
-            .bind(sig.to_string())
-            .bind(&now)
-            .execute(&state.db)
-            .await;
-
-
-            let _ = sqlx::query(
-                "INSERT INTO users (pubkey, total_deposited, total_withdrawn, created_at)
-                 VALUES (?, ?, 0, ?)
-                 ON CONFLICT(pubkey) DO UPDATE SET
-                 total_deposited = total_deposited + excluded.total_deposited"
-            )
-            .bind(&payload.from_pubkey)
-            .bind(payload.amount_sol)
-            .bind(&now)
-            .execute(&state.db)
-            .await;
-
-
-            match stake_native(&state.rpc_url, &protocol_keypair, payload.amount_sol).await {
-                Ok((stake_sig, stake_account)) => {
-                    println!("Auto staked natively. Stake signature: {}", stake_sig);
-                    let stake_id = Uuid::new_v4().to_string();
-                    let _ = sqlx::query(
-                        "INSERT INTO stake_accounts (id, pubkey, stake_account, amount_sol, signature, created_at)
-                         VALUES (?, ?, ?, ?, ?, ?)"
-                    )
-                    .bind(&stake_id)
-                    .bind(&payload.from_pubkey)
-                    .bind(&stake_account)
-                    .bind(payload.amount_sol)
-                    .bind(&stake_sig)
-                    .bind(&Utc::now().to_rfc3339())
-                    .execute(&state.db)
-                    .await;
-                }
-                Err(e) => {
-                    println!("Staking failed (deposit still recorded): {}", e);
-                }
-            }
-
-            (
-                StatusCode::OK,
-                Json(DepositResponse {
-                    success: true,
-                    message: format!("Deposit of {} SOL successful and staked on Marinade", payload.amount_sol),
-                    signature: Some(sig.to_string()),
-                }),
-            )
-        
-        },
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(DepositResponse {
-                success: false,
-                message: format!("Transaction failed: {}", e),
-                signature: None,
-            }),
-        ),
     }
+
+    (
+        StatusCode::OK,
+        Json(DepositResponse {
+            success: true,
+            message: format!("Deposit of {} SOL confirmed and staked", payload.amount_sol),
+        }),
+    )
 }

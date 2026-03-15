@@ -13,7 +13,8 @@ use solana_sdk::signature::Signer;
 use axum::{Router, routing::get, routing::post};
 use std::sync::Arc;
 use sqlx::SqlitePool;
-
+use tower_http::cors::{CorsLayer, Any};
+use axum::http::Method;
 
 pub struct AppState {
     pub rpc_url: String,
@@ -59,11 +60,18 @@ async fn main() -> anyhow::Result<()> {
         db,
     });
 
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods([Method::GET, Method::POST])
+        .allow_headers(Any);
+
     let app = Router::new()
         .route("/deposit", post(routes::deposit::handle_deposit))
         .route("/balance/:pubkey", get(routes::balance::handle_balance))
         .route("/withdraw", post(routes::withdraw::handle_withdraw))
         .route("/withdraw/claim", post(routes::withdraw::handle_claim))
+        .route("/config", get(routes::config::handle_config))
+        .layer(cors)
         .with_state(state);
 
     println!("Server running on http://localhost:3002");
